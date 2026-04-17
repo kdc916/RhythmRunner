@@ -106,6 +106,19 @@
       padding: 9px 14px; font-size: 12px; color: var(--muted); background: rgba(5,5,5,0.58);
       border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; pointer-events: none; white-space: nowrap;
     }
+    .credit {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.72);
+      background: rgba(5,5,5,0.42);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 999px;
+      pointer-events: none;
+      letter-spacing: 0.02em;
+    }
     .rank-list { margin-top: 14px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }
     .rank-row {
       display: grid; grid-template-columns: 52px 54px 1fr 90px; gap: 8px; align-items: center;
@@ -139,6 +152,12 @@
         max-width: calc(100vw - 20px);
         text-align: center;
         white-space: normal;
+      }
+      .credit {
+        left: 10px;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        font-size: 10px;
+        padding: 7px 10px;
       }
       .card {
         width: min(96vw, 640px);
@@ -305,6 +324,7 @@
           </div>
         </div>
         <div class="hint" id="hintText">Tap / Click / Space to Jump · New systems online</div>
+        <div class="credit" id="creditText">Developed by OpenAI × max / kdc916@naver.com</div>
       </div>
     </div>
   </div>
@@ -346,6 +366,8 @@
   });
 
   const dom = {
+    app: document.getElementById('app'),
+    gameShell: document.getElementById('game-shell'),
     canvas: document.getElementById('game'),
     attemptsLabel: document.getElementById('attemptsLabel'),
     modeLabel: document.getElementById('modeLabel'),
@@ -395,6 +417,7 @@
     phase: 'early',
     bpmTime: 0,
     neonStars: 0,
+    lastRarePatternAt: -99999,
   };
 
   const profile = {
@@ -454,7 +477,11 @@
     nextPortalGap: 1650,
   };
 
-  const runtime = { lastTime: 0, audioCtx: null };
+  const runtime = {
+    lastTime: 0,
+    audioCtx: null,
+    lastInputAt: 0,
+  };
 
   function loadRanks() {
     try {
@@ -829,6 +856,7 @@
     player.jumpsLeft = 2;
     player.trail.length = 0;
     player.jumpGhosts.length = 0;
+    player.jumpParticles.length = 0;
     player.gravityDir = 1;
     player.dashTimer = 0;
     player.isDashing = false;
@@ -906,7 +934,16 @@
     osc.stop(now + duration + 0.02);
   }
 
+  function shouldIgnoreInteractiveTarget(target) {
+    if (!target) return false;
+    return !!target.closest('button, input, select, textarea, a, label');
+  }
+
   function handleGameAction() {
+    const now = performance.now();
+    if (now - runtime.lastInputAt < 45) return;
+    runtime.lastInputAt = now;
+
     ensureAudio();
     input.justPressed = true;
     input.pressed = true;
@@ -932,6 +969,7 @@
 
   function endInputPress() {
     input.pressed = false;
+    player.isFlying = false;
   }
 
   function emitJumpParticles() {
@@ -1160,6 +1198,8 @@
     function rand(n = 1) { return Math.random() * n; }
     function chance(v) { return Math.random() < v; }
     function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+    function canTriggerRarePattern() { return x - state.lastRarePatternAt > 2200; }
+    function markRarePattern() { state.lastRarePatternAt = x; }
 
     function addSpikeRun(lane, yv, difficultyMul = 1) {
       const count = pick([1, 1, 2, 2, 3]);
@@ -1190,7 +1230,10 @@
       for (let i = 0; i < platformCount; i++) {
         const py = i % 2 === 0 ? yv.platform : yv.platformHigh;
         queueObstacle(createObstacle('platform', x + offset, { lane, y: py + (chance(0.5) ? rand(10) : -rand(10)), w: 82 + rand(34) }));
-        if (chance(0.7)) queueObstacle(createObstacle(chance(0.5) ? 'orb' : 'star', x + offset + 90 + rand(24), { lane, y: chance(0.55) ? yv.orb : yv.star, orbKind: chance(0.35) ? 'dash' : 'jump' }));
+        if (chance(0.7)) {
+          if (chance(0.5)) queueObstacle(createObstacle('orb', x + offset + 90 + rand(24), { lane, y: chance(0.55) ? yv.orb : yv.star, orbKind: chance(0.35) ? 'dash' : 'jump' }));
+          else queueObstacle(createObstacle('star', x + offset + 90 + rand(24), { lane, y: yv.star }));
+        }
         offset += 150 + rand(76 * difficultyMul);
       }
       return Math.max(480, offset + 160 + rand(110));
@@ -1208,6 +1251,52 @@
       return Math.max(520, offset + 190 + rand(80));
     }
 
+    function addDashBreakRush(lane, yv) {
+      markRarePattern();
+      let offset = 0;
+      const orbCount = pick([2, 3, 3]);
+      for (let i = 0; i < orbCount; i++) {
+        queueObstacle(createObstacle('orb', x + offset, { lane, y: yv.orb, orbKind: 'dash' }), 24);
+        offset += 110 + rand(20);
+        const wallCount = pick([2, 3, 4]);
+        for (let j = 0; j < wallCount; j++) {
+          queueObstacle(createObstacle('glass', x + offset, { lane, h: 68 + rand(34), w: 22 + rand(10) }), 20);
+          offset += 42 + rand(20);
+        }
+        if (chance(0.7)) queueObstacle(createObstacle('star', x + offset - 34, { lane, y: yv.star + (lane === 'top' ? rand(26) : -rand(26)) }), 16);
+        offset += 90 + rand(34);
+      }
+      return Math.max(760, offset + 180 + rand(90));
+    }
+
+    function addBonusStarLine(lane, yv) {
+      markRarePattern();
+      let offset = 0;
+      const count = pick([5, 6, 7, 8]);
+      for (let i = 0; i < count; i++) {
+        queueObstacle(createObstacle('star', x + offset, { lane, y: yv.star + (lane === 'top' ? rand(42) : -rand(42)) }), 18);
+        if (chance(0.45)) queueObstacle(createObstacle('diamond', x + offset + 28, { lane, y: chance(0.5) ? yv.diamond : yv.diamondHigh, w: 58 + rand(20), h: 34 + rand(8) }), 12);
+        offset += 84 + rand(24);
+      }
+      return Math.max(700, offset + 160 + rand(70));
+    }
+
+    function addPortalRush(lane, yv, intensity) {
+      if (intensity !== 'main') return addBlockMix(lane, yv, 1.1);
+      markRarePattern();
+      let offset = 0;
+      const rushCount = pick([2, 3]);
+      for (let i = 0; i < rushCount; i++) {
+        if (canSpawnPortalAt(x + offset)) {
+          const portalKind = i % 2 === 0 ? getPortalKindForLane(lane, intensity) : (getPortalKindForLane(lane, intensity) === 'gravityBlue' ? 'gravityYellow' : 'gravityBlue');
+          pushPortalAt(x + offset, lane, yv.portal, portalKind);
+        }
+        if (chance(0.6)) queueObstacle(createObstacle('platform', x + offset + 120 + rand(24), { lane, y: chance(0.5) ? yv.platform : yv.platformHigh, w: 80 + rand(24) }), 18);
+        offset += 300 + rand(90);
+      }
+      return Math.max(840, offset + 200 + rand(80));
+    }
+
     function addFlightRoute(lane, yv) {
       queueObstacle(createObstacle('flight', x, { lane, y: yv.flight + (chance(0.5) ? rand(18) : -rand(18)) }));
       const count = pick([1, 2, 2, 3, 3]);
@@ -1223,8 +1312,8 @@
     function addPortalRoute(lane, yv, intensity) {
       if (intensity === 'main' && canSpawnPortalAt(x)) {
         pushPortalAt(x, lane, yv.portal, getPortalKindForLane(lane, intensity));
-        if (chance(0.55)) queueObstacle(createObstacle('platform', x + 170 + rand(40), { lane, y: chance(0.5) ? yv.platform : yv.platformHigh, w: 88 + rand(24) }));
-        if (chance(0.35)) queueObstacle(createObstacle('star', x + 230 + rand(50), { lane, y: yv.star }));
+        if (chance(0.55)) queueObstacle(createObstacle('platform', x + 170 + rand(40), { lane, y: chance(0.5) ? yv.platform : yv.platformHigh, w: 88 + rand(24) }), 18);
+        if (chance(0.35)) queueObstacle(createObstacle('star', x + 230 + rand(50), { lane, y: yv.star }), 14);
         return 700 + rand(180);
       }
       return addBlockMix(lane, yv, 1.1);
@@ -1233,6 +1322,13 @@
     function addLanePattern(lane, intensity = 'main') {
       const yv = laneY[lane];
       const phaseFactor = phase === 'early' ? 0.92 : phase === 'mid' ? 1.08 : 1.22;
+      const rareAvailable = canTriggerRarePattern() && intensity === 'main';
+      const rareRoll = Math.random();
+
+      if (rareAvailable && phase !== 'early' && rareRoll < 0.08) return addDashBreakRush(lane, yv);
+      if (rareAvailable && rareRoll >= 0.08 && rareRoll < 0.14) return addBonusStarLine(lane, yv);
+      if (rareAvailable && phase !== 'early' && rareRoll >= 0.14 && rareRoll < 0.19) return addPortalRush(lane, yv, intensity);
+
       const pools = phase === 'early'
         ? ['spikeRun', 'blockMix', 'platformCombo', 'portalRoute']
         : phase === 'mid'
@@ -1916,26 +2012,37 @@
     const releaseOptions = { passive: true };
 
     const handlePointerStart = (e) => {
+      if (shouldIgnoreInteractiveTarget(e.target)) return;
       e.preventDefault();
       handleGameAction();
     };
     const handlePointerEnd = () => endInputPress();
 
-    dom.canvas.addEventListener('pointerdown', handlePointerStart, pointerOptions);
-    dom.canvas.addEventListener('pointerup', handlePointerEnd, releaseOptions);
-    dom.canvas.addEventListener('pointercancel', handlePointerEnd, releaseOptions);
-    dom.canvas.addEventListener('touchstart', handlePointerStart, pointerOptions);
-    dom.canvas.addEventListener('touchend', handlePointerEnd, releaseOptions);
-    dom.canvas.addEventListener('touchcancel', handlePointerEnd, releaseOptions);
-    dom.canvas.addEventListener('mousedown', handlePointerStart, pointerOptions);
-    dom.canvas.addEventListener('mouseup', handlePointerEnd, releaseOptions);
+    [dom.canvas, dom.gameShell].forEach((el) => {
+      if (!el) return;
+      el.addEventListener('pointerdown', handlePointerStart, pointerOptions);
+      el.addEventListener('pointerup', handlePointerEnd, releaseOptions);
+      el.addEventListener('pointercancel', handlePointerEnd, releaseOptions);
+      el.addEventListener('touchstart', handlePointerStart, pointerOptions);
+      el.addEventListener('touchend', handlePointerEnd, releaseOptions);
+      el.addEventListener('touchcancel', handlePointerEnd, releaseOptions);
+      el.addEventListener('mousedown', handlePointerStart, pointerOptions);
+      el.addEventListener('mouseup', handlePointerEnd, releaseOptions);
+    });
 
-    const startFromMenu = () => {
+    window.addEventListener('touchend', handlePointerEnd, releaseOptions);
+    window.addEventListener('mouseup', handlePointerEnd, releaseOptions);
+
+    const startFromMenu = (e) => {
+      if (e) e.preventDefault();
       ensureAudio();
       startGame();
     };
 
-    if (dom.startBtnInline) dom.startBtnInline.addEventListener('click', startFromMenu);
+    if (dom.startBtnInline) {
+      dom.startBtnInline.addEventListener('click', startFromMenu);
+      dom.startBtnInline.addEventListener('touchstart', startFromMenu, pointerOptions);
+    }
     dom.retryBtn.addEventListener('click', () => {
       dom.resultCard.classList.add('hidden');
       resetRun(true);
@@ -1955,6 +2062,7 @@
     dom.skinSelect.addEventListener('change', refreshAvatarPreview);
     dom.randomSkinBtn.addEventListener('click', applyRandomSkin);
     window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 120));
     window.addEventListener('blur', endInputPress);
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) endInputPress();
