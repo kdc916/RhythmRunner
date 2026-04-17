@@ -90,6 +90,8 @@
       border: 1px solid rgba(255,255,255,0.08); color: #d7e5ff; font-size: 13px; line-height: 1.6; text-align: left;
     }
     .button-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+    .compact-actions { align-items: stretch; }
+    .compact-actions button { flex: 1 1 0; min-width: 0; }
     button {
       appearance: none; border: 0; border-radius: 14px; padding: 12px 18px; min-width: 136px;
       font-size: 14px; font-weight: 700; cursor: pointer; color: #07111f;
@@ -152,67 +154,65 @@
 
     @media (max-width: 768px) and (orientation: portrait) {
       #center-overlay {
-        align-items: start;
-        padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+        align-items: center;
+        padding: max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom));
       }
       .card {
         width: calc(100vw - 20px);
-        max-height: calc(100vh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        max-height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
         margin-top: 0;
-        padding: 14px;
+        padding: 12px;
         border-radius: 16px;
+        overflow: hidden;
       }
       .title {
-        font-size: clamp(22px, 7vw, 32px);
-        margin-bottom: 6px;
+        font-size: clamp(20px, 6.4vw, 30px);
+        margin-bottom: 4px;
       }
       .subtitle {
-        font-size: 12px;
-        margin-bottom: 10px;
+        font-size: 11px;
+        margin-bottom: 8px;
+        line-height: 1.35;
       }
       .controls-note {
-        margin: 10px 0;
-        padding: 10px;
-        font-size: 12px;
-        line-height: 1.45;
+        margin: 8px 0;
+        padding: 8px;
+        font-size: 11px;
+        line-height: 1.35;
       }
       .custom-grid {
-        gap: 8px;
+        gap: 6px;
       }
       .field {
-        gap: 4px;
+        gap: 3px;
+      }
+      label {
+        font-size: 11px;
       }
       input, select {
-        padding: 9px 10px;
+        padding: 8px 9px;
         border-radius: 10px;
+        font-size: 13px;
       }
       .preview-wrap {
-        padding: 6px;
+        padding: 4px;
       }
       #avatarPreview {
-        width: 72px;
-        height: 72px;
+        width: 64px;
+        height: 64px;
       }
       .button-row {
-        gap: 8px;
-        margin-top: 10px;
+        gap: 6px;
+        margin-top: 8px;
       }
       button {
         min-width: 0;
-        padding: 11px 14px;
+        padding: 10px 12px;
         font-size: 13px;
       }
-    }
-      .badge { font-size: 12px; padding: 7px 10px; }
-      .score-wrap { min-width: 200px; }
-      .hint {
-        bottom: max(10px, env(safe-area-inset-bottom)); max-width: calc(100vw - 20px);
-        text-align: center; white-space: normal;
+      .compact-actions {
+        margin-top: 2px !important;
       }
-      .card { padding: 18px; border-radius: 18px; }
-      button { width: 100%; }
-      .rank-row { grid-template-columns: 42px 46px 1fr 74px; font-size: 12px; }
-      .custom-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -274,8 +274,9 @@
                   <option value="ufo">UFO</option>
                 </select>
               </div>
-              <div class="button-row" style="margin-top:0; justify-content:flex-start;">
+              <div class="button-row compact-actions" style="margin-top:0; justify-content:flex-start;">
                 <button id="randomSkinBtn" type="button">Random Skin</button>
+                <button id="startBtnInline" type="button">Start Game</button>
               </div>
               <div class="preview-wrap panel"><canvas id="avatarPreview" width="92" height="92"></canvas></div>
             </div>
@@ -290,7 +291,6 @@
               비행은 연료 기반이며, 입력을 유지하면 떠 있고 놓으면 추락합니다.
             </div>
             <div class="button-row">
-              <button id="startBtn">Start Game</button>
               <button id="muteBtn" class="secondary">Sound: On</button>
             </div>
           </div>
@@ -361,7 +361,7 @@
     resultTitle: document.getElementById('resultTitle'),
     resultText: document.getElementById('resultText'),
     rankList: document.getElementById('rankList'),
-    startBtn: document.getElementById('startBtn'),
+    startBtnInline: document.getElementById('startBtnInline'),
     retryBtn: document.getElementById('retryBtn'),
     backMenuBtn: document.getElementById('backMenuBtn'),
     muteBtn: document.getElementById('muteBtn'),
@@ -431,6 +431,7 @@
     jumpsLeft: 2,
     trail: [],
     jumpGhosts: [],
+    jumpParticles: [],
     gravityDir: 1,
     dashTimer: 0,
     isDashing: false,
@@ -700,6 +701,42 @@
     };
   }
 
+  function getObstacleBounds(ob) {
+    if (!ob) return null;
+    if (ob.type === 'orb') {
+      return { x: ob.x - ob.r - 10, y: ob.y - ob.r - 10, w: ob.r * 2 + 20, h: ob.r * 2 + 20 };
+    }
+    if (ob.type === 'star' || ob.type === 'flight') {
+      return { x: ob.x - 8, y: ob.y - 10, w: ob.w + 16, h: ob.h + 20 };
+    }
+    if (ob.type === 'portal') {
+      return { x: ob.x - 10, y: ob.y - 6, w: ob.w + 20, h: ob.h + 12 };
+    }
+    return { x: ob.x, y: ob.y, w: ob.w || 0, h: ob.h || 0 };
+  }
+
+  function boundsOverlap(a, b, padding = 0) {
+    return a.x < b.x + b.w + padding && a.x + a.w + padding > b.x && a.y < b.y + b.h + padding && a.y + a.h + padding > b.y;
+  }
+
+  function queueObstacle(ob, padding = 18) {
+    if (!ob) return null;
+    let guard = 0;
+    while (guard < 24) {
+      const a = getObstacleBounds(ob);
+      const blocker = world.obstacles.find(existing => {
+        if (!existing) return false;
+        if (existing.broken || existing.collected || existing.used) return false;
+        return boundsOverlap(a, getObstacleBounds(existing), padding);
+      });
+      if (!blocker) break;
+      ob.x = blocker.x + (blocker.w || 40) + padding;
+      guard += 1;
+    }
+    world.obstacles.push(ob);
+    return ob;
+  }
+
   function initParticles() {
     world.particles = [];
     for (let i = 0; i < 64; i++) {
@@ -724,13 +761,13 @@
     world.spawnCounter = 0;
     world.lastPortalX = 2870;
     rollNextPortalGap();
-    world.obstacles.push(createObstacle('spike', 980));
-    world.obstacles.push(createObstacle('block', 1360, { w: 46, h: 50 }));
-    world.obstacles.push(createObstacle('diamond', 1765, { y: 372, w: 72, h: 42 }));
-    world.obstacles.push(createObstacle('star', 1935, { y: 308 }));
-    world.obstacles.push(createObstacle('spike', 2160));
-    world.obstacles.push(createObstacle('block', 2520, { w: 48, h: 54 }));
-    world.obstacles.push(createObstacle('portal', 2870, { y: 170, w: 48, h: 192, portalKind: 'gravityBlue' }));
+    queueObstacle(createObstacle('spike', 980));
+    queueObstacle(createObstacle('block', 1360, { w: 46, h: 50 }));
+    queueObstacle(createObstacle('diamond', 1765, { y: 372, w: 72, h: 42 }));
+    queueObstacle(createObstacle('star', 1935, { y: 308 }));
+    queueObstacle(createObstacle('spike', 2160));
+    queueObstacle(createObstacle('block', 2520, { w: 48, h: 54 }));
+    queueObstacle(createObstacle('portal', 2870, { y: 170, w: 48, h: 192, portalKind: 'gravityBlue' }));
   }
 
   function setPhaseVisuals(phase) {
@@ -897,9 +934,31 @@
     input.pressed = false;
   }
 
+  function emitJumpParticles() {
+    const dir = player.gravityDir;
+    const originX = player.x + player.radius;
+    const originY = dir === 1 ? player.y + player.radius * 2 - 2 : player.y + 2;
+    const burst = 8;
+    for (let i = 0; i < burst; i++) {
+      const spread = (Math.random() - 0.5) * 140;
+      const lift = Math.random() * 110 + 60;
+      player.jumpParticles.push({
+        x: originX + (Math.random() - 0.5) * 10,
+        y: originY,
+        vx: spread,
+        vy: -lift * dir,
+        life: 0.32 + Math.random() * 0.14,
+        maxLife: 0.42,
+        size: 2 + Math.random() * 4,
+        color: profile.accent || profile.color,
+      });
+    }
+  }
+
   function performJump() {
     if (player.jumpsLeft <= 0) return;
     player.jumpGhosts.push({ x: player.x, y: player.y, radius: player.radius, life: 0.34, color: profile.color });
+    emitJumpParticles();
     if (player.grounded || player.coyote > 0) {
       player.vy = -CONFIG.jumpForce * player.gravityDir;
       player.grounded = false;
@@ -1074,15 +1133,15 @@
   }
 
   function pushPortalAt(x, lane, y, portalKind) {
-    world.obstacles.push(createObstacle('portal', x, { lane, y, w: 48, h: 192, portalKind }));
-    world.lastPortalX = x;
+    const portal = queueObstacle(createObstacle('portal', x, { lane, y, w: 48, h: 192, portalKind }), 28);
+    world.lastPortalX = portal ? portal.x : x;
     rollNextPortalGap();
   }
 
   function spawnPattern() {
     const x = world.nextSpawnX;
     const phase = getPhase();
-    const jitter = Math.random() * 20;
+    const jitter = Math.random() * 34;
 
     const activeLane = player.gravityDir === 1 ? 'bottom' : 'top';
     const passiveLane = activeLane === 'bottom' ? 'top' : 'bottom';
@@ -1098,119 +1157,104 @@
       return intensity === 'main' ? activePortalKind : passivePortalKind;
     }
 
-    function addLanePattern(lane, intensity = 'main') {
-      const yv = laneY[lane];
-      const rr = Math.random();
+    function rand(n = 1) { return Math.random() * n; }
+    function chance(v) { return Math.random() < v; }
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-      if (phase === 'early') {
-        if (rr < 0.28) {
-          world.obstacles.push(createObstacle('spike', x, { lane }));
-          if (intensity === 'main') world.obstacles.push(createObstacle('star', x + 78, { lane, y: yv.star + (lane === 'top' ? 24 : 0) }));
-          return 390;
-        }
-        if (rr < 0.52) {
-          world.obstacles.push(createObstacle('block', x, { lane, w: 46, h: 50 }));
-          return 420;
-        }
-        if (rr < 0.72) {
-          world.obstacles.push(createObstacle('diamond', x, { lane, y: yv.diamond, w: 72, h: 42 }));
-          return 430;
-        }
-        if (rr < 0.86 && intensity === 'main') {
-          world.obstacles.push(createObstacle('platform', x, { lane, y: yv.platform, w: 102 }));
-          world.obstacles.push(createObstacle('orb', x + 112, { lane, y: yv.orb, orbKind: 'jump' }));
-          return 470;
-        }
-        if (intensity === 'main' && canSpawnPortalAt(x)) {
-          pushPortalAt(x, lane, yv.portal, getPortalKindForLane(lane, intensity));
-          return 640;
-        }
-        world.obstacles.push(createObstacle('platform', x, { lane, y: yv.platform, w: 102 }));
-        return 470;
+    function addSpikeRun(lane, yv, difficultyMul = 1) {
+      const count = pick([1, 1, 2, 2, 3]);
+      let offset = 0;
+      for (let i = 0; i < count; i++) {
+        queueObstacle(createObstacle('spike', x + offset, { lane, w: 32 + rand(8), h: 28 + rand(8) }));
+        offset += 82 + rand(34 * difficultyMul);
       }
+      if (chance(0.45)) queueObstacle(createObstacle('star', x + offset * 0.45, { lane, y: yv.star + (lane === 'top' ? rand(30) : -rand(24)) }));
+      return Math.max(360, offset + 180 + rand(80));
+    }
 
-      if (phase === 'mid') {
-        if (rr < 0.24) {
-          world.obstacles.push(createObstacle('spike', x, { lane }));
-          world.obstacles.push(createObstacle('spike', x + 110, { lane }));
-          if (intensity === 'main') world.obstacles.push(createObstacle('star', x + 110, { lane, y: yv.star }));
-          return 540;
-        }
-        if (rr < 0.46) {
-          world.obstacles.push(createObstacle('block', x, { lane, w: 48, h: 56 }));
-          world.obstacles.push(createObstacle('block', x + 124, { lane, w: 48, h: 56 }));
-          return 560;
-        }
-        if (rr < 0.66) {
-          world.obstacles.push(createObstacle('diamond', x, { lane, y: yv.diamond, w: 86, h: 44 }));
-          world.obstacles.push(createObstacle('platform', x + 188, { lane, y: yv.platformHigh, w: 92 }));
-          return 590;
-        }
-        if (rr < 0.82 && intensity === 'main') {
-          world.obstacles.push(createObstacle('orb', x, { lane, y: yv.orb, orbKind: 'dash' }));
-          world.obstacles.push(createObstacle('glass', x + 190, { lane, h: 88 }));
-          return 590;
-        }
-        if (intensity === 'main') {
-          world.obstacles.push(createObstacle('flight', x, { lane, y: yv.flight }));
-          world.obstacles.push(createObstacle('star', x + 110, { lane, y: yv.star - (lane === 'top' ? -18 : 18) }));
-          return 520;
-        }
-        if (intensity === 'main' && canSpawnPortalAt(x)) {
-          pushPortalAt(x, lane, yv.portal, getPortalKindForLane(lane, intensity));
-          return 700;
-        }
-        world.obstacles.push(createObstacle('platform', x, { lane, y: yv.platformHigh, w: 96 }));
-        return 560;
+    function addBlockMix(lane, yv, difficultyMul = 1) {
+      const count = pick([1, 2, 2, 3]);
+      let offset = 0;
+      for (let i = 0; i < count; i++) {
+        if (chance(0.55)) queueObstacle(createObstacle('block', x + offset, { lane, w: 40 + rand(14), h: 44 + rand(18) }));
+        else queueObstacle(createObstacle('diamond', x + offset, { lane, y: chance(0.5) ? yv.diamond : yv.diamondHigh, w: 68 + rand(26), h: 38 + rand(10) }));
+        offset += 108 + rand(60 * difficultyMul);
       }
+      if (chance(0.4)) queueObstacle(createObstacle('orb', x + offset * 0.55, { lane, y: yv.orb + (chance(0.5) ? -rand(12) : rand(12)), orbKind: 'jump' }));
+      return Math.max(430, offset + 220 + rand(90));
+    }
 
-      if (rr < 0.22) {
-        world.obstacles.push(createObstacle('spike', x, { lane }));
-        world.obstacles.push(createObstacle('spike', x + 108, { lane }));
-        world.obstacles.push(createObstacle('spike', x + 216, { lane }));
-        if (intensity === 'main') world.obstacles.push(createObstacle('star', x + 108, { lane, y: yv.star }));
-        return 650;
+    function addPlatformCombo(lane, yv, difficultyMul = 1) {
+      const platformCount = pick([1, 2, 2, 3]);
+      let offset = 0;
+      for (let i = 0; i < platformCount; i++) {
+        const py = i % 2 === 0 ? yv.platform : yv.platformHigh;
+        queueObstacle(createObstacle('platform', x + offset, { lane, y: py + (chance(0.5) ? rand(10) : -rand(10)), w: 82 + rand(34) }));
+        if (chance(0.7)) queueObstacle(createObstacle(chance(0.5) ? 'orb' : 'star', x + offset + 90 + rand(24), { lane, y: chance(0.55) ? yv.orb : yv.star, orbKind: chance(0.35) ? 'dash' : 'jump' }));
+        offset += 150 + rand(76 * difficultyMul);
       }
-      if (rr < 0.44) {
-        world.obstacles.push(createObstacle('block', x, { lane, w: 48, h: 58 }));
-        world.obstacles.push(createObstacle('block', x + 126, { lane, w: 48, h: 58 }));
-        world.obstacles.push(createObstacle('diamond', x + 292, { lane, y: yv.diamondHigh, w: 82, h: 42 }));
-        return 670;
+      return Math.max(480, offset + 160 + rand(110));
+    }
+
+    function addDashGlass(lane, yv) {
+      queueObstacle(createObstacle('orb', x, { lane, y: yv.orb, orbKind: 'dash' }));
+      const walls = pick([1, 2, 2, 3]);
+      let offset = 150 + rand(40);
+      for (let i = 0; i < walls; i++) {
+        queueObstacle(createObstacle('glass', x + offset, { lane, h: 62 + rand(42), w: 24 + rand(10) }));
+        offset += 52 + rand(34);
       }
-      if (rr < 0.64) {
-        world.obstacles.push(createObstacle('platform', x, { lane, y: yv.platform, w: 108 }));
-        world.obstacles.push(createObstacle('orb', x + 112, { lane, y: yv.orb, orbKind: 'jump' }));
-        world.obstacles.push(createObstacle('diamond', x + 286, { lane, y: yv.diamond, w: 94, h: 46 }));
-        return 660;
+      if (chance(0.42)) queueObstacle(createObstacle('star', x + offset * 0.6, { lane, y: yv.star }));
+      return Math.max(520, offset + 190 + rand(80));
+    }
+
+    function addFlightRoute(lane, yv) {
+      queueObstacle(createObstacle('flight', x, { lane, y: yv.flight + (chance(0.5) ? rand(18) : -rand(18)) }));
+      const count = pick([1, 2, 2, 3, 3]);
+      let offset = 110;
+      for (let i = 0; i < count; i++) {
+        queueObstacle(createObstacle('star', x + offset, { lane, y: yv.star + (lane === 'top' ? rand(70) : -rand(70)) }));
+        if (chance(0.45)) queueObstacle(createObstacle('diamond', x + offset + 50 + rand(30), { lane, y: chance(0.5) ? yv.diamond : yv.diamondHigh, w: 66 + rand(18), h: 38 + rand(8) }));
+        offset += 90 + rand(70);
       }
-      if (rr < 0.80 && intensity === 'main') {
-        world.obstacles.push(createObstacle('orb', x, { lane, y: yv.orb, orbKind: 'dash' }));
-        world.obstacles.push(createObstacle('glass', x + 170, { lane, h: 100 }));
-        world.obstacles.push(createObstacle('glass', x + 220, { lane, h: 76 }));
-        return 610;
-      }
-      if (intensity === 'main') {
-        world.obstacles.push(createObstacle('flight', x, { lane, y: yv.flight }));
-        world.obstacles.push(createObstacle('star', x + 120, { lane, y: yv.star }));
-        world.obstacles.push(createObstacle('star', x + 220, { lane, y: yv.star + (lane === 'top' ? 34 : -34) }));
-        return 600;
-      }
+      return Math.max(560, offset + 180 + rand(90));
+    }
+
+    function addPortalRoute(lane, yv, intensity) {
       if (intensity === 'main' && canSpawnPortalAt(x)) {
         pushPortalAt(x, lane, yv.portal, getPortalKindForLane(lane, intensity));
-        world.obstacles.push(createObstacle('platform', x + 170, { lane, y: yv.platformHigh, w: 100 }));
-        return 820;
+        if (chance(0.55)) queueObstacle(createObstacle('platform', x + 170 + rand(40), { lane, y: chance(0.5) ? yv.platform : yv.platformHigh, w: 88 + rand(24) }));
+        if (chance(0.35)) queueObstacle(createObstacle('star', x + 230 + rand(50), { lane, y: yv.star }));
+        return 700 + rand(180);
       }
-      world.obstacles.push(createObstacle('block', x, { lane, w: 46, h: 54 }));
-      world.obstacles.push(createObstacle('diamond', x + 178, { lane, y: yv.diamondHigh, w: 80, h: 42 }));
-      return 690;
+      return addBlockMix(lane, yv, 1.1);
+    }
+
+    function addLanePattern(lane, intensity = 'main') {
+      const yv = laneY[lane];
+      const phaseFactor = phase === 'early' ? 0.92 : phase === 'mid' ? 1.08 : 1.22;
+      const pools = phase === 'early'
+        ? ['spikeRun', 'blockMix', 'platformCombo', 'portalRoute']
+        : phase === 'mid'
+          ? ['spikeRun', 'blockMix', 'platformCombo', 'dashGlass', 'flightRoute', 'portalRoute']
+          : ['spikeRun', 'blockMix', 'platformCombo', 'dashGlass', 'flightRoute', 'portalRoute', 'blockMix'];
+
+      const chosen = pick(pools);
+
+      if (chosen === 'spikeRun') return addSpikeRun(lane, yv, phaseFactor);
+      if (chosen === 'blockMix') return addBlockMix(lane, yv, phaseFactor);
+      if (chosen === 'platformCombo') return addPlatformCombo(lane, yv, phaseFactor);
+      if (chosen === 'dashGlass') return addDashGlass(lane, yv);
+      if (chosen === 'flightRoute') return addFlightRoute(lane, yv);
+      return addPortalRoute(lane, yv, intensity);
     }
 
     const spacing = addLanePattern(activeLane, 'main');
-    const passiveChance = phase === 'early' ? 0.14 : phase === 'mid' ? 0.22 : 0.30;
 
+    const passiveChance = phase === 'early' ? 0.18 : phase === 'mid' ? 0.28 : 0.38;
     if (Math.random() < passiveChance) {
       const originalNext = world.nextSpawnX;
-      world.nextSpawnX = x + Math.min(210, spacing * 0.36);
+      world.nextSpawnX = x + Math.min(260, spacing * (0.22 + Math.random() * 0.18));
       addLanePattern(passiveLane, 'support');
       world.nextSpawnX = originalNext;
     }
@@ -1277,6 +1321,15 @@
       t.life -= dt;
       t.radius += dt * 8;
       if (t.life <= 0) player.trail.splice(i, 1);
+    }
+    for (let i = player.jumpParticles.length - 1; i >= 0; i--) {
+      const p = player.jumpParticles[i];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 420 * dt * player.gravityDir;
+      p.size *= 0.985;
+      if (p.life <= 0 || p.size < 0.6) player.jumpParticles.splice(i, 1);
     }
   }
 
@@ -1526,24 +1579,6 @@
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
 
-    const pulse = bpmPulseValue();
-    ctx.save();
-    ctx.globalAlpha = 0.06 + pulse * 0.05;
-    ctx.strokeStyle = state.phase === 'early' ? '#79f7ff' : state.phase === 'mid' ? '#8d7bff' : '#ff8fb0';
-    for (let x = 0; x < CONFIG.canvasWidth; x += 44) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CONFIG.canvasHeight);
-      ctx.stroke();
-    }
-    for (let y = 0; y < CONFIG.canvasHeight; y += 44) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(CONFIG.canvasWidth, y);
-      ctx.stroke();
-    }
-    ctx.restore();
-
     for (const p of world.particles) {
       ctx.save();
       ctx.globalAlpha = p.alpha;
@@ -1789,6 +1824,15 @@
       drawAvatar(ctx, t.x, t.y, t.radius * 2, profile.color, profile.face, profile.skin, { simple: true });
       ctx.restore();
     }
+    for (const p of player.jumpParticles) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife) * 0.9;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   function drawPlayer() {
@@ -1868,17 +1912,30 @@
       if (e.code === 'Space' || e.code === 'ArrowUp') endInputPress();
     });
 
-    dom.canvas.addEventListener('pointerdown', (e) => {
+    const pointerOptions = { passive: false };
+    const releaseOptions = { passive: true };
+
+    const handlePointerStart = (e) => {
       e.preventDefault();
       handleGameAction();
-    }, { passive: false });
-    dom.canvas.addEventListener('pointerup', endInputPress, { passive: true });
-    dom.canvas.addEventListener('pointercancel', endInputPress, { passive: true });
+    };
+    const handlePointerEnd = () => endInputPress();
 
-    dom.startBtn.addEventListener('click', () => {
+    dom.canvas.addEventListener('pointerdown', handlePointerStart, pointerOptions);
+    dom.canvas.addEventListener('pointerup', handlePointerEnd, releaseOptions);
+    dom.canvas.addEventListener('pointercancel', handlePointerEnd, releaseOptions);
+    dom.canvas.addEventListener('touchstart', handlePointerStart, pointerOptions);
+    dom.canvas.addEventListener('touchend', handlePointerEnd, releaseOptions);
+    dom.canvas.addEventListener('touchcancel', handlePointerEnd, releaseOptions);
+    dom.canvas.addEventListener('mousedown', handlePointerStart, pointerOptions);
+    dom.canvas.addEventListener('mouseup', handlePointerEnd, releaseOptions);
+
+    const startFromMenu = () => {
       ensureAudio();
       startGame();
-    });
+    };
+
+    if (dom.startBtnInline) dom.startBtnInline.addEventListener('click', startFromMenu);
     dom.retryBtn.addEventListener('click', () => {
       dom.resultCard.classList.add('hidden');
       resetRun(true);
@@ -1898,6 +1955,10 @@
     dom.skinSelect.addEventListener('change', refreshAvatarPreview);
     dom.randomSkinBtn.addEventListener('click', applyRandomSkin);
     window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('blur', endInputPress);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) endInputPress();
+    });
   }
 
   function boot() {
