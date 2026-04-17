@@ -26,7 +26,7 @@
       -webkit-user-select: none;
     }
     #app { position: fixed; inset: 0; display: grid; place-items: center; overflow: hidden; background: #000; }
-    #game-shell { position: relative; width: 100vw; height: 100vh; display: grid; place-items: center; overflow: hidden; }
+    #game-shell { position: relative; width: 100vw; height: 100vh; display: grid; place-items: center; overflow: hidden; touch-action: none; }
     canvas {
       display: block;
       background: transparent;
@@ -129,7 +129,21 @@
     .rank-row.me { background: rgba(121,247,255,0.10); }
     .avatar-chip {
       width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-      font-size: 18px; border: 1px solid rgba(255,255,255,0.16);
+      font-size: 18px; border: 1px solid rgba(255,255,255,0.16); overflow: hidden; background: rgba(255,255,255,0.06);
+    }
+    .avatar-chip img {
+      width: 100%; height: 100%; display: block;
+      image-rendering: auto;
+    }
+    .your-rank-banner {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(121,247,255,0.10);
+      border: 1px solid rgba(121,247,255,0.20);
+      text-align: left;
+      font-size: 13px;
+      color: #dffcff;
     }
     .custom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; text-align: left; }
     .field { display: flex; flex-direction: column; gap: 6px; }
@@ -249,6 +263,7 @@
             <div class="panel badge" id="starHudLabel">Stars 0</div>
             <div class="panel badge" id="gravityHudLabel">Gravity Down</div>
             <div class="panel badge" id="flightHudLabel">Fuel 0%</div>
+            <div class="panel badge" id="comboHudLabel">Combo x1</div>
           </div>
           <div class="panel score-wrap">
             <div class="score-head"><span>Score</span><span id="scoreText">0</span></div>
@@ -309,6 +324,10 @@
               신규 요소: <b>네온 스타</b>, <b>중력 반전 포탈</b>, <b>대시 오브 + 유리 장벽</b>, <b>BPM 펄스</b>, <b>비행 아이템</b><br />
               비행은 연료 기반이며, 입력을 유지하면 떠 있고 놓으면 추락합니다.
             </div>
+            <div class="controls-note" id="missionBox">
+              <b>Run Missions</b><br />
+              <span id="missionText">Collect 10 Stars · Break 6 Glass Walls · Survive 60s</span>
+            </div>
             <div class="button-row">
               <button id="muteBtn" class="secondary">Sound: On</button>
             </div>
@@ -316,6 +335,7 @@
           <div id="resultCard" class="card hidden">
             <h2 class="title" id="resultTitle">Run Over</h2>
             <p class="subtitle" id="resultText">Score 0</p>
+            <div class="your-rank-banner" id="yourRankBanner">Your Rank: #1</div>
             <div class="rank-list" id="rankList"></div>
             <div class="button-row">
               <button id="retryBtn">Retry</button>
@@ -324,7 +344,7 @@
           </div>
         </div>
         <div class="hint" id="hintText">Tap / Click / Space to Jump · New systems online</div>
-        <div class="credit" id="creditText">Developed by OpenAI × max / kdc916@naver.com</div>
+        <div class="credit" id="creditText">Rhythm Runner Endless v1.0 · Developed by OpenAI × max / kdc916@naver.com</div>
       </div>
     </div>
   </div>
@@ -376,6 +396,7 @@
     starHudLabel: document.getElementById('starHudLabel'),
     gravityHudLabel: document.getElementById('gravityHudLabel'),
     flightHudLabel: document.getElementById('flightHudLabel'),
+    comboHudLabel: null,
     scoreText: document.getElementById('scoreText'),
     progressFill: document.getElementById('progressFill'),
     menuCard: document.getElementById('menuCard'),
@@ -383,6 +404,7 @@
     resultTitle: document.getElementById('resultTitle'),
     resultText: document.getElementById('resultText'),
     rankList: document.getElementById('rankList'),
+    yourRankBanner: document.getElementById('yourRankBanner'),
     startBtnInline: document.getElementById('startBtnInline'),
     retryBtn: document.getElementById('retryBtn'),
     backMenuBtn: document.getElementById('backMenuBtn'),
@@ -394,7 +416,11 @@
     skinSelect: document.getElementById('skinSelect'),
     randomSkinBtn: document.getElementById('randomSkinBtn'),
     avatarPreview: document.getElementById('avatarPreview'),
+    missionBox: document.getElementById('missionBox'),
+    missionText: document.getElementById('missionText'),
   };
+
+  dom.comboHudLabel = document.getElementById('comboHudLabel');
 
   const ctx = dom.canvas.getContext('2d');
   const avatarCtx = dom.avatarPreview.getContext('2d');
@@ -418,6 +444,19 @@
     bpmTime: 0,
     neonStars: 0,
     lastRarePatternAt: -99999,
+    rareFxTimer: 0,
+    rareFxType: '',
+    rareFxPulse: 0,
+    scorePopups: [],
+    timeScale: 1,
+    combo: 1,
+    comboTimer: 0,
+    tutorialStep: 0,
+    lastDeathCause: '',
+    lastDeathObstacle: null,
+    missions: null,
+    missionPopupTimer: 0,
+    missionPopupText: '',
   };
 
   const profile = {
@@ -455,6 +494,7 @@
     trail: [],
     jumpGhosts: [],
     jumpParticles: [],
+    pickupParticles: [],
     gravityDir: 1,
     dashTimer: 0,
     isDashing: false,
@@ -462,6 +502,8 @@
     canFly: false,
     isFlying: false,
     portalCooldown: 0,
+    lastPortalX: -99999,
+    safeZoneTimer: 0,
   };
 
   const input = { pressed: false, justPressed: false };
@@ -483,6 +525,20 @@
     lastInputAt: 0,
   };
 
+  function createMissionState() {
+    return {
+      starGoal: 10,
+      stars: 0,
+      starDone: false,
+      glassGoal: 6,
+      glass: 0,
+      glassDone: false,
+      surviveGoal: 60,
+      surviveDone: false,
+      allDone: false,
+    };
+  }
+
   function loadRanks() {
     try {
       const raw = localStorage.getItem('rhythm_runner_endless_ranks_v3');
@@ -503,16 +559,23 @@
     const entry = {
       name: profile.nickname,
       score,
-      ts: Date.now(),
+      ts: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       face: profile.face,
       color: profile.color,
+      skin: profile.skin,
+      eyeStyle: profile.eyeStyle,
+      mouthStyle: profile.mouthStyle,
+      deco: profile.deco,
+      outline: profile.outline,
+      accent: profile.accent,
       stars: state.neonStars,
     };
-    state.ranks.push(entry);
-    state.ranks.sort((a, b) => b.score - a.score || b.stars - a.stars || a.ts - b.ts);
-    state.ranks = state.ranks.slice(0, 10);
+    const all = [...state.ranks, entry];
+    all.sort((a, b) => b.score - a.score || b.stars - a.stars || String(a.ts).localeCompare(String(b.ts)));
+    const fullRank = all.findIndex(r => r.ts === entry.ts) + 1;
+    state.ranks = all.slice(0, 10);
     saveRanks();
-    return { rank: state.ranks.findIndex(r => r.ts === entry.ts) + 1, entry };
+    return { rank: fullRank, entry };
   }
 
   function faceEmoji(face) {
@@ -681,12 +744,69 @@
     drawAvatar(avatarCtx, 46, 46, 56, profile.color, profile.face, profile.skin);
   }
 
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function avatarDataUri(data) {
+    const skin = data.skin || 'round';
+    const color = data.color || '#65d9ff';
+    const face = data.face || 'smile';
+    const eyeStyle = data.eyeStyle || 'dot';
+    const mouthStyle = data.mouthStyle || 'smile';
+    const deco = data.deco || 'none';
+    const outline = data.outline === 'bright' ? '#ffffff' : data.outline === 'accent' ? (data.accent || '#ffffff') : '#09101d';
+    const accent = data.accent || '#ffffff';
+
+    let body = '';
+    if (skin === 'diamond') body = `<path d="M32 6 L58 32 L32 58 L6 32 Z" fill="${color}" stroke="${outline}" stroke-width="4"/>`;
+    else if (skin === 'capsule') body = `<rect x="8" y="13" width="48" height="38" rx="19" fill="${color}" stroke="${outline}" stroke-width="4"/>`;
+    else if (skin === 'ufo') body = `<ellipse cx="32" cy="32" rx="26" ry="19" fill="${color}" stroke="${outline}" stroke-width="4"/><ellipse cx="32" cy="27" rx="13" ry="7" fill="#ffffff" opacity="0.22"/>`;
+    else body = `<circle cx="32" cy="32" r="26" fill="${color}" stroke="${outline}" stroke-width="4"/>`;
+
+    let decoSvg = '';
+    if (deco === 'band') decoSvg = `<rect x="7" y="25" width="50" height="8" fill="${accent}"/>`;
+    else if (deco === 'horn') decoSvg = `<path d="M18 16 L24 3 L29 17 Z" fill="${accent}"/><path d="M46 16 L40 3 L35 17 Z" fill="${accent}"/>`;
+    else if (deco === 'antenna') decoSvg = `<line x1="32" y1="17" x2="32" y2="4" stroke="${accent}" stroke-width="3"/><circle cx="32" cy="3" r="3" fill="${accent}"/>`;
+    else if (deco === 'halo') decoSvg = `<ellipse cx="32" cy="7" rx="13" ry="4" fill="none" stroke="${accent}" stroke-width="3"/>`;
+    else if (deco === 'cheek') decoSvg = `<circle cx="20" cy="37" r="4" fill="${accent}" opacity="0.45"/><circle cx="44" cy="37" r="4" fill="${accent}" opacity="0.45"/>`;
+
+    let eyes = '';
+    if (eyeStyle === 'wide') eyes = `<rect x="20" y="23" width="6" height="6" fill="#09101d"/><rect x="38" y="23" width="6" height="6" fill="#09101d"/>`;
+    else if (eyeStyle === 'sleepy') eyes = `<rect x="18" y="25" width="9" height="2.5" fill="#09101d"/><rect x="37" y="25" width="9" height="2.5" fill="#09101d"/>`;
+    else if (eyeStyle === 'visor') eyes = `<rect x="17" y="21" width="30" height="8" fill="#09101d"/><rect x="19" y="22" width="26" height="3" fill="${accent}" opacity="0.2"/>`;
+    else if (eyeStyle === 'pixel') eyes = `<rect x="19" y="22" width="4" height="4" fill="#09101d"/><rect x="23" y="26" width="4" height="4" fill="#09101d"/><rect x="37" y="22" width="4" height="4" fill="#09101d"/><rect x="41" y="26" width="4" height="4" fill="#09101d"/>`;
+    else if (face === 'cool') eyes = `<rect x="18" y="21" width="11" height="6" fill="#09101d"/><rect x="35" y="21" width="11" height="6" fill="#09101d"/><rect x="29" y="23" width="6" height="2" fill="#09101d"/>`;
+    else if (face === 'wink') eyes = `<rect x="18" y="24" width="8" height="2.5" fill="#09101d"/><rect x="39" y="22" width="5" height="5" fill="#09101d"/>`;
+    else eyes = `<rect x="20" y="22" width="5" height="5" fill="#09101d"/><rect x="39" y="22" width="5" height="5" fill="#09101d"/>`;
+
+    let mouth = '';
+    if (mouthStyle === 'flat') mouth = `<rect x="24" y="40" width="16" height="2" fill="#09101d"/>`;
+    else if (mouthStyle === 'grin') mouth = `<rect x="22" y="38" width="20" height="4" fill="#09101d"/><rect x="23" y="39" width="18" height="1.5" fill="#ffffff" opacity="0.6"/>`;
+    else if (mouthStyle === 'o') mouth = `<circle cx="32" cy="40" r="3" fill="#09101d"/>`;
+    else if (mouthStyle === 'fang') mouth = `<rect x="24" y="39" width="16" height="2.5" fill="#09101d"/><path d="M30 41 L32 46 L34 41 Z" fill="#ffffff"/>`;
+    else mouth = `<rect x="23" y="39" width="18" height="3" fill="#09101d"/>`;
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">${body}${decoSvg}${eyes}${mouth}</svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  }
+
   function renderRanks(lastEntryTs = null) {
     const rows = state.ranks.map((r, i) => {
       const me = r.ts === lastEntryTs ? ' me' : '';
-      return `<div class="rank-row${me}"><div>#${i + 1}</div><div><span class="avatar-chip" style="background:${r.color}">${faceEmoji(r.face)}</span></div><div>${r.name} · ★${r.stars || 0}</div><div>${r.score.toLocaleString()}</div></div>`;
+      return `<div class="rank-row${me}"><div>#${i + 1}</div><div><span class="avatar-chip"><img alt="avatar" src="${avatarDataUri(r)}" /></span></div><div>${escapeHtml(r.name)} · ★${r.stars || 0}</div><div>${r.score.toLocaleString()}</div></div>`;
     }).join('');
     dom.rankList.innerHTML = rows || `<div class="rank-row"><div>-</div><div><span class="avatar-chip">🙂</span></div><div>No Rank</div><div>0</div></div>`;
+    const currentIndex = state.ranks.findIndex(r => r.ts === lastEntryTs);
+    if (currentIndex >= 0) {
+      const row = dom.rankList.children[currentIndex];
+      if (row) row.scrollIntoView({ block: 'center' });
+    }
   }
 
   function createObstacle(type, x, opts = {}) {
@@ -788,12 +908,35 @@
     world.spawnCounter = 0;
     world.lastPortalX = 2870;
     rollNextPortalGap();
-    queueObstacle(createObstacle('spike', 980));
-    queueObstacle(createObstacle('block', 1360, { w: 46, h: 50 }));
-    queueObstacle(createObstacle('diamond', 1765, { y: 372, w: 72, h: 42 }));
-    queueObstacle(createObstacle('star', 1935, { y: 308 }));
-    queueObstacle(createObstacle('spike', 2160));
-    queueObstacle(createObstacle('block', 2520, { w: 48, h: 54 }));
+
+    const starters = [
+      () => {
+        queueObstacle(createObstacle('spike', 960, { w: 34, h: 30 }));
+        queueObstacle(createObstacle('block', 1320, { w: 44, h: 48 }));
+        queueObstacle(createObstacle('star', 1500, { y: 302 }));
+        queueObstacle(createObstacle('diamond', 1780, { y: 370, w: 74, h: 42 }));
+        queueObstacle(createObstacle('spike', 2120, { w: 38, h: 34 }));
+        queueObstacle(createObstacle('block', 2470, { w: 48, h: 54 }));
+      },
+      () => {
+        queueObstacle(createObstacle('block', 980, { w: 42, h: 46 }));
+        queueObstacle(createObstacle('spike', 1260, { w: 36, h: 32 }));
+        queueObstacle(createObstacle('star', 1450, { y: 286 }));
+        queueObstacle(createObstacle('platform', 1700, { y: 330, w: 96, h: 16 }));
+        queueObstacle(createObstacle('diamond', 1980, { y: 360, w: 80, h: 42 }));
+        queueObstacle(createObstacle('spike', 2320, { w: 34, h: 30 }));
+      },
+      () => {
+        queueObstacle(createObstacle('spike', 940, { w: 34, h: 30 }));
+        queueObstacle(createObstacle('platform', 1240, { y: 334, w: 104, h: 16 }));
+        queueObstacle(createObstacle('orb', 1400, { y: 286, orbKind: 'jump' }));
+        queueObstacle(createObstacle('star', 1580, { y: 248 }));
+        queueObstacle(createObstacle('block', 1880, { w: 46, h: 52 }));
+        queueObstacle(createObstacle('diamond', 2220, { y: 332, w: 78, h: 40 }));
+      },
+    ];
+
+    starters[Math.floor(Math.random() * starters.length)]();
     queueObstacle(createObstacle('portal', 2870, { y: 170, w: 48, h: 192, portalKind: 'gravityBlue' }));
   }
 
@@ -806,6 +949,19 @@
     return state.elapsedRunTime < 20 ? 'early' : state.elapsedRunTime < 45 ? 'mid' : 'late';
   }
 
+  function formatMissionText() {
+    const m = state.missions;
+    if (!m) return 'Collect 10 Stars · Break 6 Glass Walls · Survive 60s';
+    const starMark = m.starDone ? '✓' : `${m.stars}/${m.starGoal}`;
+    const glassMark = m.glassDone ? '✓' : `${m.glass}/${m.glassGoal}`;
+    const surviveMark = m.surviveDone ? '✓' : `${Math.min(m.surviveGoal, Math.floor(state.elapsedRunTime))}/${m.surviveGoal}s`;
+    return `Stars ${starMark} · Glass ${glassMark} · Survive ${surviveMark}`;
+  }
+
+  function updateMissionText() {
+    if (dom.missionText) dom.missionText.textContent = formatMissionText();
+  }
+
   function updateHud() {
     state.phase = getPhase();
     dom.speedHudLabel.textContent = `Speed ${state.speedMultiplier.toFixed(2)}x`;
@@ -813,9 +969,16 @@
     dom.starHudLabel.textContent = `Stars ${state.neonStars}`;
     dom.gravityHudLabel.textContent = player.gravityDir === 1 ? 'Gravity Down' : 'Gravity Up';
     dom.flightHudLabel.textContent = `Fuel ${Math.max(0, Math.floor(player.flightFuel))}%`;
+    if (dom.comboHudLabel) dom.comboHudLabel.textContent = `Combo x${state.combo}`;
     dom.scoreText.textContent = Math.floor(state.score).toLocaleString();
     dom.progressFill.style.width = `${Math.min(100, (state.score % 1000) / 10)}%`;
     dom.modeLabel.textContent = state.phase === 'early' ? 'Endless · Early' : state.phase === 'mid' ? 'Endless · Mid' : 'Endless · Late';
+    if (state.rareFxTimer > 0) {
+      if (state.rareFxType === 'dashBreak') dom.modeLabel.textContent = 'Rare · Dash Break Rush';
+      else if (state.rareFxType === 'starLine') dom.modeLabel.textContent = 'Rare · Bonus Star Line';
+      else if (state.rareFxType === 'portalRush') dom.modeLabel.textContent = 'Rare · Portal Rush';
+    }
+    updateMissionText();
     setPhaseVisuals(state.phase);
   }
 
@@ -843,6 +1006,16 @@
     state.score = 0;
     state.neonStars = 0;
     state.bpmTime = 0;
+    state.scorePopups.length = 0;
+    state.timeScale = 1;
+    state.combo = 1;
+    state.comboTimer = 0;
+    state.tutorialStep = 0;
+    state.lastDeathCause = '';
+    state.lastDeathObstacle = null;
+    state.missions = createMissionState();
+    state.missionPopupTimer = 0;
+    state.missionPopupText = '';
     world.scrollX = 0;
     world.speed = CONFIG.baseScrollSpeed;
     seedInitialObstacles();
@@ -857,6 +1030,7 @@
     player.trail.length = 0;
     player.jumpGhosts.length = 0;
     player.jumpParticles.length = 0;
+    player.pickupParticles.length = 0;
     player.gravityDir = 1;
     player.dashTimer = 0;
     player.isDashing = false;
@@ -864,6 +1038,8 @@
     player.canFly = false;
     player.isFlying = false;
     player.portalCooldown = 0;
+    player.lastPortalX = -99999;
+    player.safeZoneTimer = 0;
 
     dom.attemptsLabel.textContent = `Attempt ${state.attempts}`;
     updateHud();
@@ -874,6 +1050,7 @@
     dom.menuCard.classList.remove('hidden');
     dom.resultCard.classList.add('hidden');
     dom.hintText.textContent = 'Tap / Click / Space to Jump · New systems online';
+    updateMissionText();
   }
 
   function startGame() {
@@ -885,22 +1062,31 @@
     dom.hintText.textContent = 'Space/Touch: Jump · Hold/Spam in flight to stay airborne';
   }
 
-  function failRun() {
+  function failRun(cause = 'Obstacle', obstacle = null) {
     if (state.mode !== 'playing') return;
     state.mode = 'dead';
     state.deathTimer = CONFIG.deathDelay;
     state.flash = 1;
     state.cameraShake = 18;
+    state.timeScale = 0.22;
     state.bestScore = Math.max(state.bestScore, Math.floor(state.score));
+    state.lastDeathCause = cause;
+    state.lastDeathObstacle = obstacle;
+    emitPickupParticles(player.x + player.radius, player.y + player.radius, '#ff677f', 16);
     playBeep(120, 0.08, 'square', 0.06);
     playBeep(70, 0.12, 'sawtooth', 0.06);
   }
 
   function openResult() {
+    state.timeScale = 1;
     const finalScore = Math.floor(state.score);
     const added = addRank(finalScore);
     dom.resultTitle.textContent = 'Run Over';
-    dom.resultText.textContent = `${profile.nickname} · Score ${finalScore.toLocaleString()} · Rank #${added.rank} · ★${state.neonStars}`;
+    const missionBonus = state.missions && state.missions.allDone ? ' · All Missions Clear' : '';
+    dom.resultText.textContent = `${profile.nickname} · Score ${finalScore.toLocaleString()} · Rank #${added.rank} · ★${state.neonStars}${state.lastDeathCause ? ` · KO by ${state.lastDeathCause}` : ''}${missionBonus}`;
+    if (dom.yourRankBanner) {
+      dom.yourRankBanner.innerHTML = `<div><b>Your Rank</b> #${added.rank}</div><div style="margin-top:4px; opacity:.9;">${profile.nickname} · ${finalScore.toLocaleString()} pts · ★${state.neonStars}</div><div style="margin-top:4px; opacity:.7; font-size:12px;">Top 10 leaderboard is shown below.</div>`;
+    }
     renderRanks(added.entry.ts);
     dom.resultCard.classList.remove('hidden');
   }
@@ -960,10 +1146,14 @@
     }
     if (state.mode !== 'playing') return;
 
-    if (player.canFly && player.flightFuel > 0) {
+    const canUseFlight = player.canFly && player.flightFuel > 0;
+    const groundedLike = player.grounded || player.coyote > 0;
+
+    if (canUseFlight && !groundedLike) {
       player.isFlying = true;
       return;
     }
+
     performJump();
   }
 
@@ -1069,6 +1259,9 @@
   }
 
   function resolvePortal(ob) {
+    player.lastPortalX = ob.x;
+    player.safeZoneTimer = 0.95;
+    addScorePopup(player.x + player.radius, player.y - 10, 'SAFE', ob.portalKind === 'gravityBlue' ? '#5cb6ff' : '#ffe26b');
     if (ob.portalKind === 'gravityBlue') flipGravity(-1);
     else if (ob.portalKind === 'gravityYellow') flipGravity(1);
   }
@@ -1077,7 +1270,10 @@
     const visibleLeadTime = 1.6;
     const keepUntil = world.scrollX + CONFIG.canvasWidth + world.speed * visibleLeadTime;
     world.obstacles = world.obstacles.filter(ob => ob.x <= keepUntil || (ob.x - world.scrollX) < 120);
-    for (const ob of world.obstacles) if (ob.type === 'portal') ob.triggered = false;
+    for (const ob of world.obstacles) if (ob.type === 'portal') {
+      ob.triggered = false;
+      ob.entered = false;
+    }
     let farthestX = keepUntil;
     let lastPortalX = -99999;
     for (const ob of world.obstacles) {
@@ -1099,7 +1295,7 @@
     player.coyote = 0;
     player.jumpsLeft = 2;
     player.isFlying = false;
-    player.portalCooldown = CONFIG.portalCooldownTime;
+    player.portalCooldown = 0;
     state.cameraShake = 10;
     playBeep(260, 0.08, 'triangle', 0.035);
     playBeep(420, 0.08, 'triangle', 0.028);
@@ -1110,6 +1306,7 @@
   function activateDash() {
     player.dashTimer = CONFIG.dashDuration;
     player.isDashing = true;
+    bumpCombo(0.3);
     state.cameraShake = Math.max(state.cameraShake, 8);
     playBeep(880, 0.06, 'sawtooth', 0.045);
   }
@@ -1118,21 +1315,63 @@
     player.canFly = true;
     player.flightFuel = CONFIG.flightFuelMax;
     player.isFlying = false;
+    player.jumpsLeft = Math.max(player.jumpsLeft, 1);
+    emitPickupParticles(player.x + player.radius, player.y + player.radius, '#9dffef', 12);
     playBeep(620, 0.08, 'triangle', 0.035);
     updateHud();
+  }
+
+  function emitPickupParticles(x, y, color = '#f8ff7a', amount = 12) {
+    for (let i = 0; i < amount; i++) {
+      const a = (Math.PI * 2 * i) / amount + Math.random() * 0.35;
+      const speed = 60 + Math.random() * 140;
+      player.pickupParticles.push({
+        x,
+        y,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed - 20,
+        life: 0.32 + Math.random() * 0.22,
+        maxLife: 0.54,
+        size: 2 + Math.random() * 4,
+        color,
+      });
+    }
+  }
+
+  function bumpCombo(multBoost = 0.35) {
+    state.combo = Math.min(12, state.combo + 1);
+    state.comboTimer = 2.2;
+    state.score += Math.floor(40 * state.combo * multBoost);
+  }
+
+  function decayCombo(dt) {
+    if (state.comboTimer > 0) {
+      state.comboTimer = Math.max(0, state.comboTimer - dt);
+      if (state.comboTimer === 0) state.combo = 1;
+    }
   }
 
   function collectNeonStar(ob) {
     if (ob.collected) return;
     ob.collected = true;
     state.neonStars += 1;
-    state.score += 350;
+    if (state.missions) state.missions.stars += 1;
+    bumpCombo(0.6);
+    state.score += 350 * state.combo;
+    emitPickupParticles(ob.x - world.scrollX + ob.w * 0.5, ob.y + ob.h * 0.5, '#f8ff7a', 14);
+    addScorePopup(ob.x - world.scrollX + ob.w * 0.5, ob.y - 8, '+350', '#f8ff7a');
+    state.cameraShake = Math.max(state.cameraShake, 5);
     playBeep(980, 0.05, 'triangle', 0.04);
+    checkMissionProgress();
     updateHud();
   }
 
   function updateFlight(dt) {
-    if (!player.canFly) return;
+    if (!player.canFly) {
+      player.isFlying = false;
+      return;
+    }
+
     if (player.flightFuel <= 0) {
       player.flightFuel = 0;
       player.canFly = false;
@@ -1140,15 +1379,19 @@
       updateHud();
       return;
     }
-    if (input.pressed) {
+
+    const groundedLike = player.grounded || player.coyote > 0;
+
+    if (input.pressed && !groundedLike) {
       player.isFlying = true;
       player.flightFuel -= CONFIG.flightDrainPerSec * dt;
       player.vy -= CONFIG.flightLiftPerSec * dt * player.gravityDir;
       player.grounded = false;
     } else {
       player.isFlying = false;
-      player.flightFuel = Math.max(0, player.flightFuel - CONFIG.flightDrainPerSec * dt * 0.35);
+      player.flightFuel = Math.max(0, player.flightFuel - CONFIG.flightDrainPerSec * dt * 0.18);
     }
+
     if (player.flightFuel <= 0) {
       player.flightFuel = 0;
       player.canFly = false;
@@ -1253,6 +1496,7 @@
 
     function addDashBreakRush(lane, yv) {
       markRarePattern();
+      triggerRarePatternFx('dashBreak');
       let offset = 0;
       const orbCount = pick([2, 3, 3]);
       for (let i = 0; i < orbCount; i++) {
@@ -1271,6 +1515,7 @@
 
     function addBonusStarLine(lane, yv) {
       markRarePattern();
+      triggerRarePatternFx('starLine');
       let offset = 0;
       const count = pick([5, 6, 7, 8]);
       for (let i = 0; i < count; i++) {
@@ -1284,6 +1529,7 @@
     function addPortalRush(lane, yv, intensity) {
       if (intensity !== 'main') return addBlockMix(lane, yv, 1.1);
       markRarePattern();
+      triggerRarePatternFx('portalRush');
       let offset = 0;
       const rushCount = pick([2, 3]);
       for (let i = 0; i < rushCount; i++) {
@@ -1427,6 +1673,15 @@
       p.size *= 0.985;
       if (p.life <= 0 || p.size < 0.6) player.jumpParticles.splice(i, 1);
     }
+    for (let i = player.pickupParticles.length - 1; i >= 0; i--) {
+      const p = player.pickupParticles[i];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 260 * dt;
+      p.size *= 0.988;
+      if (p.life <= 0 || p.size < 0.6) player.pickupParticles.splice(i, 1);
+    }
   }
 
   function updateRollPhysics(dt) {
@@ -1435,23 +1690,119 @@
     else player.rollAngle += angularVelocity * dt * 0.35 * player.gravityDir;
   }
 
+  function triggerRarePatternFx(type) {
+    state.rareFxType = type;
+    state.rareFxTimer = 0.95;
+    state.rareFxPulse = 1;
+    state.cameraShake = Math.max(state.cameraShake, 12);
+    if (type === 'dashBreak') {
+      playBeep(740, 0.05, 'sawtooth', 0.05);
+      playBeep(980, 0.06, 'square', 0.04);
+      dom.hintText.textContent = 'RARE: Dash Break Rush';
+    } else if (type === 'starLine') {
+      playBeep(1180, 0.05, 'triangle', 0.05);
+      playBeep(1380, 0.06, 'triangle', 0.04);
+      dom.hintText.textContent = 'RARE: Bonus Star Line';
+    } else if (type === 'portalRush') {
+      playBeep(420, 0.06, 'triangle', 0.04);
+      playBeep(620, 0.07, 'triangle', 0.04);
+      dom.hintText.textContent = 'RARE: Portal Rush';
+    }
+  }
+
+  function triggerMissionPopup(text) {
+    state.missionPopupText = text;
+    state.missionPopupTimer = 1.6;
+    state.cameraShake = Math.max(state.cameraShake, 8);
+    playBeep(1240, 0.05, 'triangle', 0.05);
+    playBeep(1480, 0.06, 'triangle', 0.04);
+  }
+
+  function checkMissionProgress() {
+    const m = state.missions;
+    if (!m) return;
+
+    if (!m.starDone && m.stars >= m.starGoal) {
+      m.starDone = true;
+      addScorePopup(CONFIG.canvasWidth * 0.5, 110, 'MISSION CLEAR: STAR HUNTER', '#f8ff7a');
+      triggerMissionPopup('Mission Clear · Star Hunter');
+      state.score += 1200;
+    }
+    if (!m.glassDone && m.glass >= m.glassGoal) {
+      m.glassDone = true;
+      addScorePopup(CONFIG.canvasWidth * 0.5, 136, 'MISSION CLEAR: GLASS BREAKER', '#76fff2');
+      triggerMissionPopup('Mission Clear · Glass Breaker');
+      state.score += 1200;
+    }
+    if (!m.surviveDone && state.elapsedRunTime >= m.surviveGoal) {
+      m.surviveDone = true;
+      addScorePopup(CONFIG.canvasWidth * 0.5, 162, 'MISSION CLEAR: SURVIVOR', '#ffffff');
+      triggerMissionPopup('Mission Clear · Survivor');
+      state.score += 1500;
+    }
+    if (!m.allDone && m.starDone && m.glassDone && m.surviveDone) {
+      m.allDone = true;
+      addScorePopup(CONFIG.canvasWidth * 0.5, 88, 'ALL MISSIONS CLEAR', '#8d7bff');
+      triggerMissionPopup('All Missions Clear');
+      state.score += 3000;
+    }
+  }
+
+  function addScorePopup(x, y, text, color = '#ffffff') {
+    state.scorePopups.push({ x, y, text, color, life: 0.7, maxLife: 0.7, vy: -32 });
+  }
+
+  function updateScorePopups(dt) {
+    for (let i = state.scorePopups.length - 1; i >= 0; i--) {
+      const p = state.scorePopups[i];
+      p.life -= dt;
+      p.y += p.vy * dt;
+      if (p.life <= 0) state.scorePopups.splice(i, 1);
+    }
+  }
+
   function updateBpm(dt) {
     state.bpmTime += dt;
+    updateScorePopups(dt);
+    if (state.missionPopupTimer > 0) {
+      state.missionPopupTimer = Math.max(0, state.missionPopupTimer - dt);
+      if (state.missionPopupTimer === 0 && state.rareFxTimer <= 0 && state.elapsedRunTime >= 15) {
+        dom.hintText.textContent = 'Space/Touch: Jump · Hold/Spam in flight to stay airborne';
+      }
+    }
+    checkMissionProgress();
+    if (state.rareFxTimer > 0) {
+      state.rareFxTimer = Math.max(0, state.rareFxTimer - dt);
+      state.rareFxPulse = Math.max(0, state.rareFxPulse - dt * 2.6);
+      if (state.rareFxTimer <= 0 && state.mode === 'playing') {
+        dom.hintText.textContent = 'Space/Touch: Jump · Hold/Spam in flight to stay airborne';
+        state.rareFxType = '';
+      }
+    }
   }
 
   function handlePortalsAndPickups(playerRect) {
+    const playerCenterX = playerRect.x + playerRect.w * 0.5;
+    const pickupSweep = world.speed * (1 / 60) + 18;
+
     for (const ob of world.obstacles) {
       const screenX = ob.x - world.scrollX;
       if ((screenX + (ob.w || 0)) < -160 || screenX > CONFIG.canvasWidth + 160) continue;
 
       if (ob.type === 'star' && !ob.collected) {
         const hit = { x: screenX + 3, y: ob.y + 3, w: ob.w - 6, h: ob.h - 6 };
-        if (rectsIntersect(playerRect, hit)) collectNeonStar(ob);
+        const centerX = hit.x + hit.w * 0.5;
+        const verticalOverlap = playerRect.y < hit.y + hit.h && playerRect.y + playerRect.h > hit.y;
+        const withinPickupWindow = centerX >= playerRect.x - 10 && centerX <= playerCenterX + pickupSweep;
+        if (verticalOverlap && withinPickupWindow) {
+          collectNeonStar(ob);
+        }
       }
 
       if (ob.type === 'flight' && !ob.collected) {
         const hit = { x: screenX + 2, y: ob.y + 2, w: ob.w - 4, h: ob.h - 4 };
-        if (rectsIntersect(playerRect, hit)) {
+        const centerX = hit.x + hit.w * 0.5;
+        if (rectsIntersect(playerRect, hit) && playerCenterX >= centerX) {
           ob.collected = true;
           activateFlight();
         }
@@ -1460,10 +1811,14 @@
       if (ob.type === 'orb' && !ob.used) {
         const orbRect = { x: screenX - ob.r, y: ob.y - ob.r, w: ob.r * 2, h: ob.r * 2 };
         const expanded = { x: orbRect.x - 12, y: orbRect.y - 12, w: orbRect.w + 24, h: orbRect.h + 24 };
-        if (rectsIntersect(playerRect, expanded)) {
+        const centerX = orbRect.x + orbRect.w * 0.5;
+        if (rectsIntersect(playerRect, expanded) && playerCenterX >= centerX) {
           ob.used = true;
-          if (ob.orbKind === 'dash') activateDash();
-          else {
+          if (ob.orbKind === 'dash') {
+            emitPickupParticles(screenX, ob.y, '#ff677f', 12);
+            activateDash();
+          } else {
+            emitPickupParticles(screenX, ob.y, '#ffe56c', 10);
             player.jumpsLeft = Math.max(player.jumpsLeft, 2);
             playBeep(760, 0.05, 'triangle', 0.03);
           }
@@ -1474,19 +1829,50 @@
       if (ob.type === 'portal') {
         const hit = getPortalHitbox(screenX, ob);
         const intersects = rectsIntersect(playerRect, hit);
-        if (intersects && !ob.triggered && player.portalCooldown <= 0) {
+        const centerX = hit.x + hit.w * 0.5;
+        const samePortalRecently = Math.abs(ob.x - player.lastPortalX) < 8;
+
+        if (intersects && !ob.entered) {
+          ob.entered = true;
+        }
+
+        if (ob.entered && !ob.triggered && !samePortalRecently && playerCenterX >= centerX) {
           ob.triggered = true;
           resolvePortal(ob);
-        } else if (!intersects && ob.triggered) {
-          ob.triggered = false;
+        }
+
+        if (!intersects) {
+          ob.entered = false;
+          if (ob.triggered) ob.triggered = false;
         }
       }
     }
   }
 
+  function updateTutorialHints() {
+    if (state.elapsedRunTime < 4) {
+      dom.hintText.textContent = 'TUTORIAL: Tap to Jump';
+      state.tutorialStep = 1;
+    } else if (state.elapsedRunTime < 8) {
+      dom.hintText.textContent = 'TUTORIAL: Double tap for 2nd Jump';
+      state.tutorialStep = 2;
+    } else if (state.elapsedRunTime < 12) {
+      dom.hintText.textContent = 'TUTORIAL: Portals flip gravity after you pass through';
+      state.tutorialStep = 3;
+    } else if (state.elapsedRunTime < 15) {
+      dom.hintText.textContent = 'TUTORIAL: Dash orb breaks glass walls';
+      state.tutorialStep = 4;
+    } else if (state.tutorialStep !== 5 && state.rareFxTimer <= 0) {
+      dom.hintText.textContent = 'Space/Touch: Jump · Hold/Spam in flight to stay airborne';
+      state.tutorialStep = 5;
+    }
+  }
+
   function updateGameplay(dt) {
     state.elapsedRunTime += dt;
-    if (player.portalCooldown > 0) player.portalCooldown = Math.max(0, player.portalCooldown - dt);
+    decayCombo(dt);
+    updateTutorialHints();
+    if (player.safeZoneTimer > 0) player.safeZoneTimer = Math.max(0, player.safeZoneTimer - dt);
     updateAutoSpeed();
     updateBpm(dt);
     world.scrollX += world.speed * dt;
@@ -1514,6 +1900,7 @@
         player.y = floorY;
         player.vy = 0;
         player.grounded = true;
+        player.isFlying = false;
         player.coyote = CONFIG.coyoteTime;
         player.jumpsLeft = 2;
       }
@@ -1521,6 +1908,7 @@
       player.y = floorY;
       player.vy = 0;
       player.grounded = true;
+      player.isFlying = false;
       player.coyote = CONFIG.coyoteTime;
       player.jumpsLeft = 2;
     }
@@ -1552,14 +1940,12 @@
       }
 
       if (ob.type === 'diamond') {
-        const hit = { x: screenX, y: ob.y, w: ob.w, h: ob.h };
-        const overlapsHorizontally = playerCenterX >= hit.x && playerCenterX <= hit.x + hit.w;
-        if (overlapsHorizontally) {
-          const diamondTop = diamondTopYAtX(hit, playerCenterX);
-          if (player.gravityDir === 1) {
-            if (player.vy >= 0 && prevBottom <= diamondTop + 10 && currBottom >= diamondTop) tryLandOnSurface(diamondTop);
-          } else if (player.vy <= 0 && prevTop >= diamondTop - 10 && currTop <= diamondTop) {
-            tryLandOnSurface(diamondTop);
+        const hit = getDiamondCollisionBounds(screenX, ob);
+        if (player.safeZoneTimer <= 0 && rectsIntersect(playerRect, hit)) {
+          const diamondTop = diamondTopYAtX({ x: screenX, y: ob.y, w: ob.w, h: ob.h }, playerCenterX);
+          if (!isLandedOnTop(diamondTop, playerCenterX, { x: hit.x, w: hit.w })) {
+            failRun('Platform', ob);
+            break;
           }
         }
       }
@@ -1579,22 +1965,26 @@
         const hit = ob.lane === 'top'
           ? { x: screenX + 4, y: ob.y + 2, w: ob.w - 8, h: ob.h - 4 }
           : { x: screenX + 3, y: ob.y + 3, w: ob.w - 6, h: ob.h - 6 };
-        if (rectsIntersect(playerRect, hit)) {
-          failRun();
+        if (player.safeZoneTimer <= 0 && rectsIntersect(playerRect, hit)) {
+          failRun('Spike', ob);
           break;
         }
       }
 
       if (ob.type === 'glass' && !ob.broken) {
         const hit = { x: screenX + 2, y: ob.y + 2, w: ob.w - 4, h: ob.h - 4 };
-        if (rectsIntersect(playerRect, hit)) {
+        if (player.safeZoneTimer <= 0 && rectsIntersect(playerRect, hit)) {
           if (player.isDashing) {
             ob.broken = true;
-            state.score += 250;
+            bumpCombo(0.45);
+            state.score += 250 * state.combo;
+            if (state.missions) state.missions.glass += 1;
+            addScorePopup(screenX + ob.w * 0.5, ob.y - 6, '+250', '#76fff2');
+            checkMissionProgress();
             state.cameraShake = Math.max(state.cameraShake, 9);
             playBeep(520, 0.03, 'square', 0.035);
           } else {
-            failRun();
+            failRun('Glass Wall', ob);
             break;
           }
         }
@@ -1602,11 +1992,11 @@
 
       if (ob.type === 'block') {
         const hit = { x: screenX + 4, y: ob.y + 3, w: ob.w - 8, h: ob.h - 6 };
-        if (rectsIntersect(playerRect, hit)) {
+        if (player.safeZoneTimer <= 0 && rectsIntersect(playerRect, hit)) {
           const width = { x: hit.x, w: hit.w };
           const topY = player.gravityDir === 1 ? ob.y : ob.y + ob.h;
           if (!isLandedOnTop(topY, playerCenterX, width)) {
-            failRun();
+            failRun('Block', ob);
             break;
           }
         }
@@ -1614,11 +2004,11 @@
 
       if (ob.type === 'platform') {
         const hit = { x: screenX + 3, y: ob.y + 2, w: ob.w - 6, h: ob.h + 4 };
-        if (rectsIntersect(playerRect, hit)) {
+        if (player.safeZoneTimer <= 0 && rectsIntersect(playerRect, hit)) {
           const width = { x: hit.x, w: hit.w };
           const topY = player.gravityDir === 1 ? ob.y : ob.y + ob.h;
           if (!isLandedOnTop(topY, playerCenterX, width)) {
-            failRun();
+            failRun('Diamond', ob);
             break;
           }
         }
@@ -1629,23 +2019,26 @@
         if (rectsIntersect(playerRect, hit)) {
           const diamondTop = diamondTopYAtX({ x: screenX, y: ob.y, w: ob.w, h: ob.h }, playerCenterX);
           if (!isLandedOnTop(diamondTop, playerCenterX, { x: hit.x, w: hit.w })) {
-            failRun();
+            failRun('Diamond', ob);
             break;
           }
         }
       }
     }
 
-    if (player.y > CONFIG.canvasHeight + 220 || player.y < -220) failRun();
+    if (player.y > CONFIG.canvasHeight + 220 || player.y < -220) failRun('Out of Bounds', null);
     updateHud();
   }
 
   function update(dt) {
-    if (state.flash > 0) state.flash = Math.max(0, state.flash - dt * 2.6);
-    updateCameraShake(dt);
-    updateParticles(dt);
-    updateGhosts(dt);
-    if (state.mode === 'playing') updateGameplay(dt);
+    const scaledDt = dt * state.timeScale;
+    if (state.mode !== 'dead') state.timeScale = 1;
+    if (state.mode === 'dead') state.timeScale = Math.min(1, state.timeScale + dt * 1.8);
+    if (state.flash > 0) state.flash = Math.max(0, state.flash - scaledDt * 2.6);
+    updateCameraShake(scaledDt);
+    updateParticles(scaledDt);
+    updateGhosts(scaledDt);
+    if (state.mode === 'playing') updateGameplay(scaledDt);
     else if (state.mode === 'dead') {
       state.deathTimer -= dt;
       if (state.deathTimer <= 0) openResult();
@@ -1929,6 +2322,15 @@
       ctx.fill();
       ctx.restore();
     }
+    for (const p of player.pickupParticles) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife) * 0.95;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   function drawPlayer() {
@@ -1951,15 +2353,84 @@
       ctx.arc(0, 0, player.radius + 9, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if (player.safeZoneTimer > 0) {
+      ctx.strokeStyle = player.gravityDir === 1 ? '#ffe26b' : '#5cb6ff';
+      ctx.globalAlpha = Math.min(0.9, player.safeZoneTimer);
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, player.radius + 14 + (1 - player.safeZoneTimer) * 8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
   function drawStateTint() {
-    if (state.flash <= 0) return;
+    if (state.flash > 0) {
+      ctx.save();
+      ctx.globalAlpha = state.flash * 0.12;
+      ctx.fillStyle = state.phase === 'early' ? '#79f7ff' : state.phase === 'mid' ? '#8d7bff' : '#ff5c8a';
+      ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+      ctx.restore();
+    }
+
+    if (state.rareFxTimer > 0) {
+      const alpha = Math.min(0.22, state.rareFxTimer * 0.22);
+      const color = state.rareFxType === 'dashBreak' ? '#ff677f' : state.rareFxType === 'starLine' ? '#ffe56c' : '#5cb6ff';
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+      ctx.restore();
+
+      const pulse = state.rareFxPulse;
+      const radius = 120 + (1 - pulse) * 420;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = alpha * 1.6;
+      ctx.lineWidth = 8 + pulse * 6;
+      ctx.beginPath();
+      ctx.arc(CONFIG.canvasWidth * 0.5, CONFIG.canvasHeight * 0.5, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawMissionPopup() {
+    if (state.missionPopupTimer <= 0 || !state.missionPopupText) return;
     ctx.save();
-    ctx.globalAlpha = state.flash * 0.12;
-    ctx.fillStyle = state.phase === 'early' ? '#79f7ff' : state.phase === 'mid' ? '#8d7bff' : '#ff5c8a';
-    ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+    const alpha = Math.min(1, state.missionPopupTimer / 0.5);
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.font = '800 20px Inter, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(state.missionPopupText, CONFIG.canvasWidth * 0.5, 72);
+    ctx.restore();
+  }
+
+  function drawScorePopups() {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = '700 18px Inter, sans-serif';
+    for (const p of state.scorePopups) {
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      ctx.fillStyle = p.color;
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.restore();
+  }
+
+  function drawDeathHighlight() {
+    if (state.mode !== 'dead' || !state.lastDeathObstacle) return;
+    const ob = state.lastDeathObstacle;
+    const x = ob.x - world.scrollX;
+    const y = ob.y;
+    const w = ob.w || 40;
+    const h = ob.h || 40;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = '#ff677f';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(x - 6, y - 6, w + 12, h + 12);
     ctx.restore();
   }
 
@@ -1970,7 +2441,10 @@
     drawBackground();
     drawGround();
     for (const ob of world.obstacles) drawObstacle(ob);
+    drawDeathHighlight();
     drawPlayer();
+    drawScorePopups();
+    drawMissionPopup();
     drawStateTint();
     ctx.restore();
 
